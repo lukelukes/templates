@@ -1,0 +1,7 @@
+# https://gremlins.dev/latest/usage/configuration/
+
+unleash:
+  timeout-coefficient: 15
+  threshold:
+    efficacy: 80
+    mutant-coverage: 90
