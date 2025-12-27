@@ -1,4 +1,4 @@
-module pj
+module replaceme
 
 go 1.25.5
 
