@@ -1,6 +1,6 @@
 BUILD_DIR := out
-BINARY := $(BUILD_DIR)/replaceme
-PKG := ./cmd/replaceme
+BINARY := $(BUILD_DIR)/$replaceme
+PKG := ./cmd/cli
 COVER_OUT := $(BUILD_DIR)/coverage.out
 GOBIN := $(shell go env GOPATH)/bin
 
@@ -10,10 +10,9 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Date=$(DATE)"
 
-.PHONY: all build test test-integration test-all coverage clean install help
+.PHONY: all build test test-property test-property-deep test-integration test-all coverage clean install help
 .PHONY: mutation mutation-dry mutation-diff mutation-report
 .PHONY: release release-dry
-.PHONY: stats stats-quick
 
 all: build
 
@@ -28,14 +27,20 @@ build: | $(BUILD_DIR) ## Build the binary
 test: ## Run unit tests
 	go test -race ./internal/... ./cmd/...
 
+test-property: ## Run property-based tests (100 iterations)
+	go test -race ./proptest -run Property
+
+test-property-deep: ## Run property-based tests (10000 iterations, finds rare bugs)
+	go test -race ./proptest -run Property -rapid.checks=10000
+
 test-integration: ## Run integration tests
 	#go test -race ./tests/integration/...
 	echo "No integration tests yet"
 
-test-all: test test-integration
+test-all: test test-property test-integration
 
 coverage: | $(BUILD_DIR) ## Generate coverage report
-	go test -coverprofile=$(COVER_OUT) ./internal/...
+	go test -coverprofile=$(COVER_OUT) ./internal/... ./cmd/...
 	go tool cover -func=$(COVER_OUT)
 
 coverage-html: coverage ## Open coverage in browser
@@ -43,31 +48,32 @@ coverage-html: coverage ## Open coverage in browser
 
 clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR)
+	go clean -cache
 
 install: build ## Install to ~/.local/bin/
 	cp $(BINARY) ~/.local/bin/
 
 ##@ Mutation Testing
 mutation: ## Run mutation testing on internal packages
-	$(GOBIN)/gremlins unleash \
+	gremlins unleash \
 		-E "_mock.*\.go$$" \
-		-E "test_helpers\.go$$" \
-		./internal
+		-E "test_helpers\.go$$"
 
 mutation-diff: ## Run mutation testing only on changed files
-	$(GOBIN)/gremlins unleash --diff "origin/master" \
+	gremlins unleash --diff "origin/master" \
 		--threshold-efficacy 80 \
-		--threshold-mcover 80 \
-		./internal/...
+		--threshold-mcover 80
 
 mutation-report: | $(BUILD_DIR) ## Generate JSON mutation report
-	$(GOBIN)/gremlins unleash \
+	gremlins unleash \
 		-E "_mock.*\.go$$" \
 		-E "test_helpers\.go$$" \
-		--output $(BUILD_DIR)/mutation-report.json \
-		./internal
+		--output $(BUILD_DIR)/mutation-report.json
 
 ##@ Lint & QA
+install-hooks: ## Installs lefthook git hooks
+	lefthook install
+
 lint: ## Run golangci-lint per .golangci.yml
 	@golangci-lint run
 
@@ -77,8 +83,8 @@ lint-fix: ## Run golangci-lint with --fix (applies autofixes incl. formatters)
 fmt: ## Auto-fix formatting/imports
 	@golangci-lint fmt
 
-fmt-check: ## Check formatting/imports
-	@golangci-lint fmt
+fmt-check: ## Check formatting/imports (fails if unformatted)
+	@test -z "$$(golangci-lint fmt --diff)" || (echo "Run 'make fmt' to fix formatting" && exit 1)
 
 vet: ## Run go vet
 	@go vet ./...
@@ -105,6 +111,9 @@ release: ## Create a release (requires GITHUB_TOKEN)
 	goreleaser release --clean
 
 ##@ Utility
+init-toolchain: ## Installs all mise managed tools
+	mise install
+
 help: ## Show this help (auto-generated)
 	@awk 'BEGIN {FS = ":.*##"; ORS="";} \
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0,5); next } \
